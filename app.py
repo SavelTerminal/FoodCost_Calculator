@@ -6,6 +6,7 @@
 import os
 import hashlib
 import re
+import unicodedata
 import streamlit as st
 from math import ceil, floor
 import matplotlib.pyplot as plt  # per il grafico a torta
@@ -85,6 +86,21 @@ if "new_batch_buffer" not in st.session_state:
 # -----------------------------------------------------------------------------
 # FUNZIONI DI SUPPORTO
 # -----------------------------------------------------------------------------
+_slug_counts: dict[str, int] = {}
+
+def slugify(text: str) -> str:
+    """Return a safe slug usable in widget keys."""
+    txt = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    txt = re.sub(r"[^\w\s-]", "", txt).strip().lower()
+    return re.sub(r"[\s-]+", "_", txt)
+
+def unique_slug(text: str) -> str:
+    """Return slugified text, adding a numeric suffix if already used."""
+    base = slugify(text)
+    count = _slug_counts.get(base, 0)
+    _slug_counts[base] = count + 1
+    return base if count == 0 else f"{base}_{count}"
+
 def _new_batch_id() -> str:
     bid = f"b{st.session_state.batch_id_counter}"
     st.session_state.batch_id_counter += 1
@@ -147,14 +163,15 @@ def ingredient_inline_creator(name_key: str, prefix: str = "") -> str | None:
     if name in st.session_state.ingredients:
         st.caption("Using catalog price for this ingredient.")
         return name
+    safe_name = unique_slug(name)
     st.warning("This ingredient is not in the catalog yet. Add it now to compute costs.")
     with st.expander("➕ Add to catalog now", expanded=True):
-        base_unit = st.selectbox("Base unit for pricing", ["kg", "L"], key=f"{prefix}new_ing_unit_{name}")
+        base_unit = st.selectbox("Base unit for pricing", ["kg", "L"], key=f"{prefix}new_ing_unit_{safe_name}")
         pack_qty  = st.number_input("Package size (in base unit)", min_value=0.0001, value=1.0, step=0.1,
-                                    key=f"{prefix}new_ing_qty_{name}")
+                                    key=f"{prefix}new_ing_qty_{safe_name}")
         pack_price= st.number_input("Package price", min_value=0.0, value=1.0, step=0.10,
-                                    key=f"{prefix}new_ing_price_{name}")
-        if st.button("Save to catalog", key=f"{prefix}save_ing_{name}"):
+                                    key=f"{prefix}new_ing_price_{safe_name}")
+        if st.button("Save to catalog", key=f"{prefix}save_ing_{safe_name}"):
             st.session_state.ingredients[name] = {
                 "unit": base_unit,
                 "package_qty": float(pack_qty),
