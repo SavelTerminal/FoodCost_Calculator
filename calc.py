@@ -33,12 +33,20 @@ def to_weight_kg(name: str, qty: float, unit: str, densities: Dict[str, float]) 
 
 
 def batch_total_cost(batch: Dict[str, Any], ingredients: Dict[str, Dict[str, Any]]) -> float:
-    """Compute total batch cost given ingredient catalog."""
+    """Compute total batch cost given ingredient catalog.
+
+    Raises:
+        ValueError: if one or more ingredients are missing from the catalog.
+    """
     total = 0.0
+    missing = []
     for it in batch.get("items", []):
         if it["name"] not in ingredients:
+            missing.append(it["name"])
             continue
         total += unit_cost(it["name"], ingredients) * to_base(float(it["qty"]), it["unit"])
+    if missing:
+        raise ValueError(", ".join(sorted(set(missing))))
     return total
 
 

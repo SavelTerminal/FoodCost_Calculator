@@ -17,6 +17,7 @@ def test_slugify_and_unique_slug(monkeypatch):
     app = importlib.import_module("app")
     importlib.reload(app)
     assert app.slugify("Crème fraîche!") == "creme_fraiche"
+    app.st.session_state["slug_counts"] = {}
     first = app.unique_slug("Crème fraîche")
     second = app.unique_slug("Creme fraiche")
     assert first == "creme_fraiche"

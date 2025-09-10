@@ -38,3 +38,10 @@ def test_batch_total_weight_kg():
     total, unknown = batch_total_weight_kg(batch, densities)
     assert total == pytest.approx(1.5)
     assert unknown == 1
+
+
+def test_batch_total_cost_unknown():
+    ingredients = {"Flour": {"package_price": 2.0, "package_qty": 1}}
+    batch = {"items": [{"name": "Flour", "qty": 1, "unit": "kg"}, {"name": "Salt", "qty": 1, "unit": "kg"}]}
+    with pytest.raises(ValueError):
+        batch_total_cost(batch, ingredients)

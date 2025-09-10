@@ -1,0 +1,9 @@
+{
+  "Flour 00": {"unit": "kg", "package_qty": 25.0, "package_price": 29.90},
+  "Water": {"unit": "L", "package_qty": 10.0, "package_price": 1.50},
+  "Salt": {"unit": "kg", "package_qty": 1.0, "package_price": 0.50},
+  "Yeast": {"unit": "kg", "package_qty": 1.0, "package_price": 8.00},
+  "Mozzarella": {"unit": "kg", "package_qty": 1.0, "package_price": 6.50},
+  "Tomato": {"unit": "kg", "package_qty": 1.0, "package_price": 1.40},
+  "Oil EVO": {"unit": "L", "package_qty": 1.0, "package_price": 7.00}
+}
