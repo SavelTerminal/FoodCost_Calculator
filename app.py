@@ -7,8 +7,8 @@ import os
 import hashlib
 import re
 import streamlit as st
-from math import ceil, floor
 import matplotlib.pyplot as plt  # per il grafico a torta
+from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
 
 # -----------------------------------------------------------------------------
 # CONFIG
@@ -55,20 +55,20 @@ if not st.session_state.unlocked:
 # -----------------------------------------------------------------------------
 if "ingredients" not in st.session_state:
     st.session_state.ingredients = {
-        "Flour 00":   {"unit": "kg", "package_qty": 25.0, "package_price": 29.90},
-        "Water":      {"unit": "L",  "package_qty": 10.0, "package_price": 1.50},
-        "Salt":       {"unit": "kg", "package_qty": 1.0,  "package_price": 0.50},
-        "Yeast":      {"unit": "kg", "package_qty": 1.0,  "package_price": 8.00},
-        "Mozzarella": {"unit": "kg", "package_qty": 1.0,  "package_price": 6.50},
-        "Tomato":     {"unit": "kg", "package_qty": 1.0,  "package_price": 1.40},
-        "Oil EVO":    {"unit": "L",  "package_qty": 1.0,  "package_price": 7.00},
+        "Flour 00":   {"unit": "kg", "package_qty": Decimal("25.0"), "package_price": Decimal("29.90")},
+        "Water":      {"unit": "L",  "package_qty": Decimal("10.0"), "package_price": Decimal("1.50")},
+        "Salt":       {"unit": "kg", "package_qty": Decimal("1.0"),  "package_price": Decimal("0.50")},
+        "Yeast":      {"unit": "kg", "package_qty": Decimal("1.0"),  "package_price": Decimal("8.00")},
+        "Mozzarella": {"unit": "kg", "package_qty": Decimal("1.0"),  "package_price": Decimal("6.50")},
+        "Tomato":     {"unit": "kg", "package_qty": Decimal("1.0"),  "package_price": Decimal("1.40")},
+        "Oil EVO":    {"unit": "L",  "package_qty": Decimal("1.0"),  "package_price": Decimal("7.00")},
     }
 
 # densità (kg/L) per convertire volumi in peso batch
 if "densities" not in st.session_state:
     st.session_state.densities = {
-        "Water": 1.0,
-        "Oil EVO": 0.91,
+        "Water": Decimal("1.0"),
+        "Oil EVO": Decimal("0.91"),
     }
 
 if "batch_id_counter" not in st.session_state:
@@ -78,7 +78,7 @@ if "batches" not in st.session_state:
 if "recipes" not in st.session_state:
     st.session_state.recipes = {}
 if "new_batch_buffer" not in st.session_state:
-    st.session_state.new_batch_buffer = {"name": "", "category": "", "portion_weight_g": 280.0, "items": []}
+    st.session_state.new_batch_buffer = {"name": "", "category": "", "portion_weight_g": Decimal("280.0"), "items": []}
 
 # -----------------------------------------------------------------------------
 # FUNZIONI DI SUPPORTO
@@ -88,80 +88,107 @@ def _new_batch_id() -> str:
     st.session_state.batch_id_counter += 1
     return bid
 
-def unit_cost(name: str) -> float:
-    d = st.session_state.ingredients[name]
-    return float(d["package_price"]) / max(float(d["package_qty"]), 1e-9)
 
-def to_base(qty: float, unit: str) -> float:
-    if unit == "g":  return qty / 1000.0
-    if unit == "ml": return qty / 1000.0
+def dec(v) -> Decimal:
+    """Helper to convert values to Decimal via string to avoid float issues."""
+    return Decimal(str(v))
+
+def unit_cost(name: str) -> Decimal:
+    d = st.session_state.ingredients[name]
+    price = dec(d["package_price"])
+    qty = dec(d["package_qty"])
+    return price / (qty if qty != 0 else Decimal("1e-9"))
+
+
+def to_base(qty: Decimal, unit: str) -> Decimal:
+    if unit == "g":
+        return qty / Decimal("1000")
+    if unit == "ml":
+        return qty / Decimal("1000")
     return qty
 
-def to_weight_kg(name: str, qty: float, unit: str) -> float:
-    if unit == "kg": return qty
-    if unit == "g":  return qty / 1000.0
+
+def to_weight_kg(name: str, qty: Decimal, unit: str) -> Decimal:
+    if unit == "kg":
+        return qty
+    if unit == "g":
+        return qty / Decimal("1000")
     if unit in ("L", "ml"):
         dens = st.session_state.densities.get(name)
-        if not dens:
-            return 0.0
-        return dens * qty if unit == "L" else dens * qty / 1000.0
-    return 0.0
+        if dens is None:
+            return Decimal("0")
+        dens = dec(dens)
+        return dens * qty if unit == "L" else dens * qty / Decimal("1000")
+    return Decimal("0")
 
-def batch_total_cost(batch: dict) -> float:
-    total = 0.0
+
+def batch_total_cost(batch: dict) -> Decimal:
+    total = Decimal("0")
     for it in batch.get("items", []):
         if it["name"] not in st.session_state.ingredients:
             continue
-        total += unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"])
+        total += unit_cost(it["name"]) * to_base(dec(it["qty"]), it["unit"])
     return total
 
-def batch_total_weight_kg(batch: dict) -> tuple[float, int]:
-    w, unknown = 0.0, 0
+
+def batch_total_weight_kg(batch: dict) -> tuple[Decimal, int]:
+    w, unknown = Decimal("0"), 0
     for it in batch.get("items", []):
-        wk = to_weight_kg(it["name"], float(it["qty"]), it["unit"])
-        if it["unit"] in ("L", "ml") and wk == 0.0:
+        wk = to_weight_kg(it["name"], dec(it["qty"]), it["unit"])
+        if it["unit"] in ("L", "ml") and wk == 0:
             unknown += 1
         w += wk
     return w, unknown
 
+
 def batch_portions_yield(batch: dict) -> int:
-    pw = float(batch.get("portion_weight_g") or 0.0)
+    pw = dec(batch.get("portion_weight_g") or 0)
     if pw <= 0:
         return 0
     tot_w, _ = batch_total_weight_kg(batch)
-    return max(floor((tot_w * 1000.0) / pw), 0)
+    return max(int((tot_w * Decimal("1000")) // pw), 0)
 
-def batch_cost_per_portion(batch: dict) -> float | None:
+
+def batch_cost_per_portion(batch: dict) -> Decimal | None:
     total = batch_total_cost(batch)
     portions = batch_portions_yield(batch)
     if portions <= 0:
         return None
-    return total / portions
+    return total / Decimal(portions)
 
-def toppings_cost_per_portion(recipe: dict) -> float:
-    total = 0.0
+
+def toppings_cost_per_portion(recipe: dict) -> Decimal:
+    total = Decimal("0")
     for it in recipe.get("items", []):
         if it["name"] not in st.session_state.ingredients:
             continue
-        total += unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"])
-    return total / max(recipe.get("portions", 1), 1)
+        total += unit_cost(it["name"]) * to_base(dec(it["qty"]), it["unit"])
+    portions = Decimal(recipe.get("portions", 1))
+    if portions <= 0:
+        portions = Decimal("1")
+    return total / portions
 
-def recipe_cost_per_pizza(recipe_name: str) -> float:
+
+def recipe_cost_per_pizza(recipe_name: str) -> Decimal:
     r = st.session_state.recipes[recipe_name]
-    bcost = 0.0
+    bcost = Decimal("0")
     for bu in r.get("batch_uses", []):
         b = st.session_state.batches.get(bu["batch_id"])
         if not b:
             continue
         cpp = batch_cost_per_portion(b)
         if cpp is not None:
-            bcost += cpp * float(bu.get("portions", 0) or 0)
+            bcost += cpp * dec(bu.get("portions", 0) or 0)
     return bcost + toppings_cost_per_portion(r)
+
 
 def format_money(x, cur):
     if x is None:
         return "—"
+    if not isinstance(x, Decimal):
+        x = dec(x)
     symbol = "€" if cur == "EUR" else "$"
+    x = x.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return f"{symbol}{x:,.2f}"
 
 def batch_label(bid: str) -> str:
@@ -180,15 +207,15 @@ def ingredient_inline_creator(name_key: str, prefix: str = "") -> str | None:
     st.warning("This ingredient is not in the catalog yet. Add it now to compute costs.")
     with st.expander("➕ Add to catalog now", expanded=True):
         base_unit = st.selectbox("Base unit for pricing", ["kg", "L"], key=f"{prefix}new_ing_unit_{name}")
-        pack_qty  = st.number_input("Package size (in base unit)", min_value=0.0001, value=1.0, step=0.1,
-                                    key=f"{prefix}new_ing_qty_{name}")
-        pack_price= st.number_input("Package price", min_value=0.0, value=1.0, step=0.10,
-                                    key=f"{prefix}new_ing_price_{name}")
+        pack_qty  = dec(st.number_input("Package size (in base unit)", min_value=0.0001, value=1.0, step=0.1,
+                                    key=f"{prefix}new_ing_qty_{name}"))
+        pack_price= dec(st.number_input("Package price", min_value=0.0, value=1.0, step=0.10,
+                                    key=f"{prefix}new_ing_price_{name}"))
         if st.button("Save to catalog", key=f"{prefix}save_ing_{name}"):
             st.session_state.ingredients[name] = {
                 "unit": base_unit,
-                "package_qty": float(pack_qty),
-                "package_price": float(pack_price)
+                "package_qty": pack_qty,
+                "package_price": pack_price
             }
             st.success(f"Added '{name}' to catalog.")
             st.rerun()
@@ -209,20 +236,20 @@ with tabs[0]:
     else:
         rsel = st.selectbox("Recipe", list(st.session_state.recipes.keys()), key="home_recipe")
         currency = st.selectbox("Currency", ["EUR", "USD"], key="home_currency")
-        tax_pct = st.number_input("Tax % (VAT/Sales Tax)", 0.0, 50.0, 9.0, 0.5, key="home_taxpct")
-        target_fc = st.slider("Target Food-Cost %", 20, 40, 30, key="home_targetfc") / 100.0
-        step = st.selectbox("Rounding step", [0.10, 0.50, 1.00], index=1, key="home_roundstep")
-        sell_gross = st.number_input("Selling price (GROSS)", 0.0, value=9.90, step=0.10, key="home_sellgross")
+        tax_pct = dec(st.number_input("Tax % (VAT/Sales Tax)", 0.0, 50.0, 9.0, 0.5, key="home_taxpct"))
+        target_fc = dec(st.slider("Target Food-Cost %", 20, 40, 30, key="home_targetfc")) / Decimal("100")
+        step = dec(st.selectbox("Rounding step", [0.10, 0.50, 1.00], index=1, key="home_roundstep"))
+        sell_gross = dec(st.number_input("Selling price (GROSS)", 0.0, value=9.90, step=0.10, key="home_sellgross"))
 
         cpp = recipe_cost_per_pizza(rsel)
-        sell_net = sell_gross / (1.0 + tax_pct/100.0) if sell_gross > 0 else 0.0
-        current_fc = (cpp / sell_net) if sell_net > 0 else 0.0
-        rec_net = cpp / max(target_fc, 1e-9)
-        rec_gross = ceil((rec_net * (1.0 + tax_pct/100.0)) / step) * step
+        sell_net = sell_gross / (Decimal("1") + tax_pct/Decimal("100")) if sell_gross > 0 else Decimal("0")
+        current_fc = (cpp / sell_net) if sell_net > 0 else Decimal("0")
+        rec_net = cpp / (target_fc if target_fc > 0 else Decimal("1e-9"))
+        rec_gross = ((rec_net * (Decimal("1") + tax_pct/Decimal("100"))) / step).to_integral_value(rounding=ROUND_UP) * step
         margin_now = sell_net - cpp
 
         st.metric("Cost per portion", format_money(cpp, currency))
-        st.metric("Current Food-Cost", f"{current_fc*100:,.1f}%")
+        st.metric("Current Food-Cost", f"{float(current_fc*Decimal('100')):,.1f}%")
         st.metric("Recommended Price (GROSS)", format_money(rec_gross, currency))
         st.metric("Margin now (net)", format_money(margin_now, currency))
 
@@ -285,11 +312,11 @@ with tabs[2]:
                                           options=list(st.session_state.batches.keys()),
                                           format_func=batch_label,
                                           key="recipes_pick_batch")
-                pp = st.number_input("Portions of this batch used in recipe",
-                                     min_value=0.0, value=1.0, step=0.5, key="recipes_batch_pp")
+                pp = dec(st.number_input("Portions of this batch used in recipe",
+                                     min_value=0.0, value=1.0, step=0.5, key="recipes_batch_pp"))
                 if st.button("Add batch to recipe", key="recipes_add_batch_btn"):
                     r.setdefault("batch_uses", [])
-                    r["batch_uses"].append({"batch_id": bid_to_add, "portions": float(pp)})
+                    r["batch_uses"].append({"batch_id": bid_to_add, "portions": pp})
                     st.success("Batch attached")
                     st.rerun()
             else:
@@ -299,7 +326,7 @@ with tabs[2]:
             st.subheader("➕ Add extra ingredient (per portion)")
             ingr = st.selectbox("Ingredient (from catalog)", list(st.session_state.ingredients.keys()),
                                 key="recipes_ingr_select")
-            qty = st.number_input("Qty", 0.0, value=0.10, step=0.01, key="recipes_qty")
+            qty = dec(st.number_input("Qty", 0.0, value=0.10, step=0.01, key="recipes_qty"))
             unit = st.selectbox("Unit", ["kg", "g", "L", "ml"], key="recipes_unit")
             c1, c2, c3 = st.columns([1, 1, 1])
             if c1.button("Add item", key="recipes_add_item"):
@@ -341,9 +368,9 @@ with tabs[3]:
             st.markdown("#### 📄 Basic")
             b["name"] = st.text_input("Batch name (free text)", value=b.get("name",""), key=f"b_name_{bid_sel}")
             b["category"] = st.text_input("Category (free text)", value=b.get("category",""), key=f"b_cat_{bid_sel}")
-            b["portion_weight_g"] = st.number_input("Portion weight (g)", 1.0,
+            b["portion_weight_g"] = dec(st.number_input("Portion weight (g)", 1.0,
                                                     value=float(b.get("portion_weight_g") or 280.0),
-                                                    step=10.0, key=f"b_pw_{bid_sel}")
+                                                    step=10.0, key=f"b_pw_{bid_sel}"))
 
             st.divider()
 
@@ -357,7 +384,7 @@ with tabs[3]:
 
             st.markdown("##### ➕ Add ingredient to this batch")
             name_ok_e = ingredient_inline_creator(name_key=f"edit_ing_name_{bid_sel}", prefix=f"b_{bid_sel}_")
-            qty_e = st.number_input("Qty (total in batch)", 0.0, value=0.5, step=0.1, key=f"b_add_qty_{bid_sel}")
+            qty_e = dec(st.number_input("Qty (total in batch)", 0.0, value=0.5, step=0.1, key=f"b_add_qty_{bid_sel}"))
             unit_e = st.selectbox("Unit", ["kg", "g", "L", "ml"], key=f"b_add_unit_{bid_sel}")
             ec1, ec2 = st.columns([1, 1])
             if ec1.button("Add item", key=f"b_add_btn_{bid_sel}"):
@@ -386,7 +413,7 @@ with tabs[3]:
 
             m1, m2, m3 = st.columns(3)
             m1.metric("Total cost", format_money(total_cost, "EUR"))
-            m2.metric("Total weight", f"{total_w:.3f} kg")
+            m2.metric("Total weight", f"{float(total_w):.3f} kg")
             m3.metric("Est. portions", f"{portions:d}" if portions else "—")
             m1, m2 = st.columns(2)
             m1.metric("Cost / portion", format_money(cpp, "EUR"))
@@ -399,7 +426,7 @@ with tabs[3]:
             for it in b.get("items", []):
                 if it["name"] in st.session_state.ingredients:
                     cost_labels.append(it["name"])
-                    cost_vals.append(unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"]))
+                    cost_vals.append(float(unit_cost(it["name"]) * to_base(dec(it["qty"]), it["unit"])))
             if sum(cost_vals) > 0:
                 fig, ax = plt.subplots()
                 ax.pie(cost_vals, labels=cost_labels, autopct='%1.1f%%', startangle=90)
@@ -425,9 +452,9 @@ with tabs[3]:
         st.markdown("#### 📄 Basic")
         nb["name"] = st.text_input("Batch name (free text)", value=nb.get("name",""), key="nb_name")
         nb["category"] = st.text_input("Category (free text)", value=nb.get("category",""), key="nb_cat")
-        nb["portion_weight_g"] = st.number_input("Portion weight (g)", 1.0,
-                                                 value=float(nb.get("portion_weight_g", 280.0)),
-                                                 step=10.0, key="nb_pw")
+        nb["portion_weight_g"] = dec(st.number_input("Portion weight (g)", 1.0,
+                                                 value=float(nb.get("portion_weight_g", Decimal("280.0"))),
+                                                 step=10.0, key="nb_pw"))
 
         st.divider()
 
@@ -440,7 +467,7 @@ with tabs[3]:
 
         st.markdown("##### ➕ Add ingredient to NEW batch")
         name_ok = ingredient_inline_creator(name_key="new_ing_name", prefix="nb_")
-        qty_val = st.number_input("Qty (total in batch)", 0.0, value=0.5, step=0.1, key="nb_add_qty")
+        qty_val = dec(st.number_input("Qty (total in batch)", 0.0, value=0.5, step=0.1, key="nb_add_qty"))
         unit_val = st.selectbox("Unit", ["kg", "g", "L", "ml"], key="nb_add_unit")
         c1, c2 = st.columns([1, 1])
         if c1.button("Add item to NEW batch", key="nb_add_btn"):
@@ -467,7 +494,7 @@ with tabs[3]:
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Total cost", format_money(tmp_cost, "EUR"))
-        m2.metric("Total weight", f"{tmp_w:.3f} kg")
+        m2.metric("Total weight", f"{float(tmp_w):.3f} kg")
         m3.metric("Est. portions", f"{tmp_portions:d}" if tmp_portions else "—")
         m1, m2 = st.columns(2)
         m1.metric("Cost / portion", format_money(tmp_cpp, "EUR"))
@@ -478,17 +505,17 @@ with tabs[3]:
         if st.button("✅ Create batch", key="nb_create"):
             if not nb["name"]:
                 st.error("Please enter a batch name")
-            elif float(nb.get("portion_weight_g") or 0) <= 0:
+            elif nb.get("portion_weight_g", Decimal("0")) <= 0:
                 st.error("Please set a valid portion weight (g)")
             else:
                 bid = _new_batch_id()
                 st.session_state.batches[bid] = {
                     "name": nb["name"].strip(),
                     "category": nb["category"].strip(),
-                    "portion_weight_g": float(nb["portion_weight_g"]),
+                    "portion_weight_g": nb["portion_weight_g"],
                     "items": list(nb.get("items", []))
                 }
-                st.session_state.new_batch_buffer = {"name": "", "category": "", "portion_weight_g": 280.0, "items": []}
+                st.session_state.new_batch_buffer = {"name": "", "category": "", "portion_weight_g": Decimal("280.0"), "items": []}
                 st.success(f"Batch created: {st.session_state.batches[bid]['name']} [{bid}]")
                 st.rerun()
 
@@ -503,13 +530,13 @@ with tabs[4]:
         with st.expander(name, expanded=False):
             d["unit"] = st.selectbox(f"{name} unit", ["kg", "L"],
                                      index=0 if d["unit"] == "kg" else 1, key=f"ing_unit_{name}")
-            d["package_qty"] = st.number_input(f"{name} package size ({d['unit']})",
+            d["package_qty"] = dec(st.number_input(f"{name} package size ({d['unit']})",
                                                min_value=0.0001, value=float(d["package_qty"]),
-                                               step=0.1, key=f"ing_qty_{name}")
-            d["package_price"] = st.number_input(f"{name} package price",
+                                               step=0.1, key=f"ing_qty_{name}"))
+            d["package_price"] = dec(st.number_input(f"{name} package price",
                                                  min_value=0.0, value=float(d["package_price"]),
-                                                 step=0.10, key=f"ing_price_{name}")
-            unit_cost_val = d["package_price"] / max(d["package_qty"], 1e-9)
+                                                 step=0.10, key=f"ing_price_{name}"))
+            unit_cost_val = d["package_price"] / (d["package_qty"] if d["package_qty"] > 0 else Decimal("1e-9"))
             st.info(f"Computed unit cost: {format_money(unit_cost_val, 'EUR')}/{d['unit']}")
 
     st.divider()
@@ -519,7 +546,7 @@ with tabs[4]:
             if new_in in st.session_state.ingredients:
                 st.error("Ingredient already exists.")
             else:
-                st.session_state.ingredients[new_in] = {"unit": "kg", "package_qty": 1.0, "package_price": 1.0}
+                st.session_state.ingredients[new_in] = {"unit": "kg", "package_qty": Decimal("1.0"), "package_price": Decimal("1.0")}
                 st.success("Ingredient added")
                 st.rerun()
         else:
