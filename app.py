@@ -14,11 +14,17 @@ import streamlit as st
 from math import ceil, floor
 import matplotlib.pyplot as plt  # per il grafico a torta
 try:
-    from babel.numbers import format_currency
+    from babel.numbers import format_currency, format_decimal
 except Exception:  # pragma: no cover - fallback if Babel missing
     def format_currency(amount, currency, locale="en_US"):
         symbol = "€" if currency == "EUR" else "$"
         return f"{symbol}{amount:,.2f}"
+
+    def format_decimal(number, format="#,##0.###", locale="en_US"):
+        decimals = 0
+        if "." in format:
+            decimals = len(format.split(".")[1].replace("#", ""))
+        return f"{number:,.{decimals}f}"
 
 from calc import unit_cost, batch_total_cost, batch_total_weight_kg, to_base
 
@@ -192,6 +198,17 @@ def format_money(x, cur):
     locale = st.session_state.get("locale", "en_US")
     return format_currency(x, cur, locale=locale)
 
+
+def format_number(x, decimals: int = 2) -> str:
+    """Format a generic number following the current locale."""
+    locale = st.session_state.get("locale", "en_US")
+    pattern = f"#,##0.{ '0'*decimals }" if decimals > 0 else "#,##0"
+    return format_decimal(x, format=pattern, locale=locale)
+
+
+def format_percent(x: float, decimals: int = 1) -> str:
+    return f"{format_number(x * 100, decimals)}%"
+
 def batch_label(bid: str) -> str:
     b = st.session_state.batches[bid]
     cat = f" ({b.get('category','').strip()})" if b.get("category","").strip() else ""
@@ -232,183 +249,183 @@ def ingredient_inline_creator(name_key: str, prefix: str = "") -> str | None:
     return None
 
 # -----------------------------------------------------------------------------
-# UI — TABS with sidebar navigation
+# UI — sidebar navigation
 # -----------------------------------------------------------------------------
 sections = ["Food Cost (Home)", "Menu (soon)", "Recipes", "Batches", "Ingredients", "Settings"]
 page = st.sidebar.selectbox("Navigate", sections, key="nav")
-tabs = st.tabs(sections)
 
 # -----------------------------------------------------------------------------
 # HOME
 # -----------------------------------------------------------------------------
 if page == "Food Cost (Home)":
-    with tabs[0]:
-        st.header("Food Cost — Caveman Mode")
-        if not st.session_state.recipes:
-            st.info("No recipes yet. Create one in the 'Recipes' tab.")
-        else:
-            rsel = st.selectbox("Recipe", list(st.session_state.recipes.keys()), key="home_recipe")
-            currency = st.selectbox("Currency", ["EUR", "USD"], key="home_currency")
-            tax_pct = st.number_input("Tax % (VAT/Sales Tax)", 0.0, 50.0, 9.0, 0.5, key="home_taxpct")
-            target_fc = st.slider("Target Food-Cost %", 20, 40, 30, key="home_targetfc") / 100.0
-            step = st.selectbox("Rounding step", [0.10, 0.50, 1.00], index=1, key="home_roundstep")
-            sell_gross = st.number_input("Selling price (GROSS)", 0.0, value=9.90, step=0.10, key="home_sellgross")
+    st.header("Food Cost — Caveman Mode")
+    if not st.session_state.recipes:
+        st.info("No recipes yet. Create one in the 'Recipes' tab.")
+    else:
+        rsel = st.selectbox("Recipe", list(st.session_state.recipes.keys()), key="home_recipe")
+        currency = st.selectbox("Currency", ["EUR", "USD"], key="home_currency")
+        tax_pct = st.number_input("Tax % (VAT/Sales Tax)", 0.0, 50.0, 9.0, 0.5, key="home_taxpct")
+        target_fc = st.slider("Target Food-Cost %", 20, 40, 30, key="home_targetfc") / 100.0
+        step = st.selectbox("Rounding step", [0.10, 0.50, 1.00], index=1, key="home_roundstep")
+        sell_gross = st.number_input("Selling price (GROSS)", 0.0, value=9.90, step=0.10, key="home_sellgross")
 
-            cpp = recipe_cost_per_pizza(rsel)
-            sell_net = sell_gross / (1.0 + tax_pct/100.0) if sell_gross > 0 else 0.0
-            current_fc = (cpp / sell_net) if sell_net > 0 else 0.0
-            rec_net = cpp / max(target_fc, 1e-9)
-            rec_gross = ceil((rec_net * (1.0 + tax_pct/100.0)) / step) * step
-            margin_now = sell_net - cpp
+        cpp = recipe_cost_per_pizza(rsel)
+        sell_net = sell_gross / (1.0 + tax_pct/100.0) if sell_gross > 0 else 0.0
+        current_fc = (cpp / sell_net) if sell_net > 0 else 0.0
+        rec_net = cpp / max(target_fc, 1e-9)
+        rec_gross = ceil((rec_net * (1.0 + tax_pct/100.0)) / step) * step
+        margin_now = sell_net - cpp
 
-            st.metric("Cost per portion", format_money(cpp, currency))
-            st.metric("Current Food-Cost", f"{current_fc*100:,.1f}%")
-            st.metric("Recommended Price (GROSS)", format_money(rec_gross, currency))
-            st.metric("Margin now (net)", format_money(margin_now, currency))
+        st.metric("Cost per portion", format_money(cpp, currency))
+        st.metric("Current Food-Cost", format_percent(current_fc))
+        st.metric("Recommended Price (GROSS)", format_money(rec_gross, currency))
+        st.metric("Margin now (net)", format_money(margin_now, currency))
 
 # -----------------------------------------------------------------------------
 # MENU (placeholder)
 # -----------------------------------------------------------------------------
 if page == "Menu (soon)":
-    with tabs[1]:
-        st.header("Menu (Dynamic) — coming next")
-        st.info("Tabella con tutte le ricette, prezzi e margini live (prossima iterazione).")
+    st.header("Menu (Dynamic) — coming next")
+    st.info("Tabella con tutte le ricette, prezzi e margini live (prossima iterazione).")
 
 # -----------------------------------------------------------------------------
 # RECIPES
 # -----------------------------------------------------------------------------
 if page == "Recipes":
-    with tabs[2]:
-        st.header("Recipes")
+    st.header("Recipes")
+    tab_new, tab_manage = st.tabs(["Create new", "Manage"])
 
-    st.subheader("Create new recipe")
-    with st.form("create_recipe_form"):
-        new_name = st.text_input("Recipe name", key="recipes_new_name")
-        new_portions = st.number_input("Recipe portions (usually 1)", 1, value=1, step=1, key="recipes_new_portions")
-        submitted = st.form_submit_button("Create recipe")
-        if submitted:
-            if not new_name:
-                st.error("Please enter a recipe name")
-            elif new_name in st.session_state.recipes:
-                st.error("A recipe with this name already exists.")
-            else:
-                st.session_state.recipes[new_name] = {"portions": int(new_portions), "batch_uses": [], "items": []}
-                save_state("recipes", st.session_state.recipes)
-                st.success("Recipe created")
-                st.rerun()
-
-    st.divider()
-
-    if st.session_state.recipes:
-        rsel = st.selectbox("Select recipe", list(st.session_state.recipes.keys()), key="recipes_view_recipe")
-        r = st.session_state.recipes[rsel]
-
-        colA, colB = st.columns([1, 1])
-        with colA:
-            st.subheader("Batches in this recipe 🧱")
-            if r.get("batch_uses"):
-                for bu in r["batch_uses"]:
-                    bid = bu["batch_id"]
-                    label = batch_label(bid) if bid in st.session_state.batches else f"[missing {bid}]"
-                    st.write(f"- {label} × {bu.get('portions', 0)}")
-            else:
-                st.info("No batches attached yet.")
-
-            st.subheader("Extra ingredients (per portion) 🧀")
-            if r.get("items"):
-                for it in r["items"]:
-                    st.write(f"- {it['name']}: {it['qty']} {it['unit']}")
-            else:
-                st.info("No extra ingredients.")
-
-            st.success(f"Cost per portion: {format_money(recipe_cost_per_pizza(rsel), 'EUR')}")
-
-        with colB:
-            st.subheader("Attach a batch ➕")
-            if st.session_state.batches:
-                with st.form("attach_batch_form"):
-                    bf = st.session_state.get("batch_filter", "")
-                    options = [bid for bid in st.session_state.batches if bf.lower() in st.session_state.batches[bid]["name"].lower()]
-                    bid_to_add = st.selectbox("Choose batch",
-                                              options=options,
-                                              format_func=batch_label,
-                                              key="recipes_pick_batch")
-                    pp = st.number_input("Portions of this batch used in recipe",
-                                         min_value=0.0, value=1.0, step=0.5, key="recipes_batch_pp")
-                    submitted = st.form_submit_button("Add batch to recipe")
-                    if submitted:
-                        r.setdefault("batch_uses", [])
-                        r["batch_uses"].append({"batch_id": bid_to_add, "portions": float(pp)})
-                        save_state("recipes", st.session_state.recipes)
-                        st.success("Batch attached")
-                        st.rerun()
-            else:
-                st.info("No batches yet. Create them in 'Batches' tab.")
-
-            st.markdown("---")
-            st.subheader("Add extra ingredient (per portion) ➕")
-            with st.form("add_extra_ing_form"):
-                ingr = st.selectbox("Ingredient (from catalog)", list(st.session_state.ingredients.keys()),
-                                    key="recipes_ingr_select")
-                qty = st.number_input("Qty", 0.0, value=0.10, step=0.01, key="recipes_qty")
-                unit = st.selectbox("Unit", ["kg", "g", "L", "ml"], key="recipes_unit")
-                c1, c2, c3 = st.columns([1, 1, 1])
-                add_btn = c1.form_submit_button("Add item")
-                rem_btn = c2.form_submit_button("Remove last item")
-                del_btn = c3.form_submit_button("Delete recipe")
-                if add_btn:
-                    r.setdefault("items", [])
-                    r["items"].append({"name": ingr, "qty": qty, "unit": unit})
+    with tab_new:
+        with st.form("create_recipe_form"):
+            new_name = st.text_input("Recipe name", key="recipes_new_name")
+            new_portions = st.number_input("Recipe portions (usually 1)", 1, value=1, step=1, key="recipes_new_portions")
+            submitted = st.form_submit_button("Create recipe")
+            if submitted:
+                if not new_name:
+                    st.error("Please enter a recipe name")
+                elif new_name in st.session_state.recipes:
+                    st.error("A recipe with this name already exists.")
+                else:
+                    st.session_state.recipes[new_name] = {"portions": int(new_portions), "batch_uses": [], "items": []}
                     save_state("recipes", st.session_state.recipes)
-                    st.success("Ingredient added")
+                    st.success("Recipe created")
                     st.rerun()
-                if rem_btn:
-                    if r.get("items"):
-                        r["items"].pop()
+
+    with tab_manage:
+        if not st.session_state.recipes:
+            st.info("No recipes yet. Create one in the 'Create new' tab.")
+        else:
+            rsel = st.selectbox("Select recipe", list(st.session_state.recipes.keys()), key="recipes_view_recipe")
+            r = st.session_state.recipes[rsel]
+
+            colA, colB = st.columns([1, 1])
+            with colA:
+                st.subheader("Batches in this recipe 🧱")
+                if r.get("batch_uses"):
+                    for bu in r["batch_uses"]:
+                        bid = bu["batch_id"]
+                        label = batch_label(bid) if bid in st.session_state.batches else f"[missing {bid}]"
+                        st.write(f"- {label} × {bu.get('portions', 0)}")
+                else:
+                    st.info("No batches attached yet.")
+
+                st.subheader("Extra ingredients (per portion) 🧀")
+                if r.get("items"):
+                    for it in r["items"]:
+                        st.write(f"- {it['name']}: {it['qty']} {it['unit']}")
+                else:
+                    st.info("No extra ingredients.")
+
+                st.success(f"Cost per portion: {format_money(recipe_cost_per_pizza(rsel), 'EUR')}")
+
+            with colB:
+                st.subheader("Attach a batch ➕")
+                if st.session_state.batches:
+                    with st.form("attach_batch_form"):
+                        bf = st.session_state.get("batch_filter", "")
+                        options = [bid for bid in st.session_state.batches if bf.lower() in st.session_state.batches[bid]["name"].lower()]
+                        bid_to_add = st.selectbox("Choose batch",
+                                                  options=options,
+                                                  format_func=batch_label,
+                                                  key="recipes_pick_batch")
+                        pp = st.number_input("Portions of this batch used in recipe",
+                                             min_value=0.0, value=1.0, step=0.5, key="recipes_batch_pp")
+                        submitted = st.form_submit_button("Add batch to recipe")
+                        if submitted:
+                            r.setdefault("batch_uses", [])
+                            r["batch_uses"].append({"batch_id": bid_to_add, "portions": float(pp)})
+                            save_state("recipes", st.session_state.recipes)
+                            st.success("Batch attached")
+                            st.rerun()
+                else:
+                    st.info("No batches yet. Create them in 'Batches' tab.")
+
+                st.markdown("---")
+                st.subheader("Add extra ingredient (per portion) ➕")
+                with st.form("add_extra_ing_form"):
+                    ingr = st.selectbox("Ingredient (from catalog)", list(st.session_state.ingredients.keys()),
+                                        key="recipes_ingr_select")
+                    qty = st.number_input("Qty", 0.0, value=0.10, step=0.01, key="recipes_qty")
+                    unit = st.selectbox("Unit", ["kg", "g", "L", "ml"], key="recipes_unit")
+                    c1, c2, c3 = st.columns([1, 1, 1])
+                    add_btn = c1.form_submit_button("Add item")
+                    rem_btn = c2.form_submit_button("Remove last item")
+                    del_btn = c3.form_submit_button("Delete recipe")
+                    if add_btn:
+                        r.setdefault("items", [])
+                        r["items"].append({"name": ingr, "qty": qty, "unit": unit})
                         save_state("recipes", st.session_state.recipes)
-                        st.warning("Removed last")
+                        st.success("Ingredient added")
                         st.rerun()
-                if del_btn:
-                    st.session_state.recipes.pop(rsel, None)
-                    save_state("recipes", st.session_state.recipes)
-                    st.warning("Recipe deleted")
-                    st.rerun()
+                    if rem_btn:
+                        if r.get("items"):
+                            r["items"].pop()
+                            save_state("recipes", st.session_state.recipes)
+                            st.warning("Removed last")
+                            st.rerun()
+                    if del_btn:
+                        st.session_state.recipes.pop(rsel, None)
+                        save_state("recipes", st.session_state.recipes)
+                        st.warning("Recipe deleted")
+                        st.rerun()
 
 # -----------------------------------------------------------------------------
-# BATCHES — pannello EDIT (sinistra) + pannello NEW (destra) ben distinti
+# BATCHES — edit vs new separated in tabs
 # -----------------------------------------------------------------------------
 if page == "Batches":
-    with tabs[3]:
-        st.header("Batches")
+    st.header("Batches")
 
-        batch_filter = st.sidebar.text_input("Filter batches", key="batch_filter")
-        colL, colR = st.columns([1, 1])
+    batch_filter = st.sidebar.text_input("Filter batches", key="batch_filter")
+    tab_edit, tab_new = st.tabs(["Edit batch", "Create new batch"])
 
-    # -------------------- EDIT SELECTED --------------------
-    with colL:
+    with tab_edit:
         st.subheader("Edit selected batch 🛠️")
         if not st.session_state.batches:
-            st.info("No batches yet. Create one on the right.")
+            st.info("No batches yet. Create one in the 'Create new batch' tab.")
         else:
             options = [bid for bid in st.session_state.batches if batch_filter.lower() in st.session_state.batches[bid]["name"].lower()]
-            bid_sel = st.selectbox("Select batch",
-                                   options=options,
-                                   format_func= batch_label,
-                                   key="b_sel")
+            bid_sel = st.selectbox(
+                "Select batch",
+                options=options,
+                format_func=batch_label,
+                key="b_sel",
+            )
             b = st.session_state.batches[bid_sel]
 
-            # Sezione base
             st.markdown("#### Basic 📄")
-            b["name"] = st.text_input("Batch name (free text)", value=b.get("name",""), key=f"b_name_{bid_sel}")
-            b["category"] = st.text_input("Category (free text)", value=b.get("category",""), key=f"b_cat_{bid_sel}")
-            b["portion_weight_g"] = st.number_input("Portion weight (g)", 1.0,
-                                                    value=float(b.get("portion_weight_g") or 280.0),
-                                                    step=10.0, key=f"b_pw_{bid_sel}")
+            b["name"] = st.text_input("Batch name (free text)", value=b.get("name", ""), key=f"b_name_{bid_sel}")
+            b["category"] = st.text_input("Category (free text)", value=b.get("category", ""), key=f"b_cat_{bid_sel}")
+            b["portion_weight_g"] = st.number_input(
+                "Portion weight (g)",
+                1.0,
+                value=float(b.get("portion_weight_g") or 280.0),
+                step=10.0,
+                key=f"b_pw_{bid_sel}",
+            )
             save_state("batches", st.session_state.batches)
 
             st.divider()
 
-            # Ingredienti + form di aggiunta nello stesso pannello
             st.markdown("#### Ingredients in this batch (TOTAL quantities) 🧾")
             if b.get("items"):
                 for it in b["items"]:
@@ -433,16 +450,14 @@ if page == "Batches":
                         save_state("batches", st.session_state.batches)
                         st.success("Item added")
                         st.rerun()
-                if rem_btn:
-                    if b.get("items"):
-                        b["items"].pop()
-                        save_state("batches", st.session_state.batches)
-                        st.warning("Removed last")
-                        st.rerun()
+                if rem_btn and b.get("items"):
+                    b["items"].pop()
+                    save_state("batches", st.session_state.batches)
+                    st.warning("Removed last")
+                    st.rerun()
 
             st.divider()
 
-            # Riepilogo + grafico a torta
             st.markdown("#### Batch Summary 📊")
             try:
                 total_cost = batch_total_cost(b, st.session_state.ingredients)
@@ -458,7 +473,7 @@ if page == "Batches":
 
             m1, m2, m3 = st.columns(3)
             m1.metric("Total cost", format_money(total_cost, "EUR"))
-            m2.metric("Total weight", f"{total_w:.3f} kg")
+            m2.metric("Total weight", f"{format_number(total_w * 1000, 0)} g")
             m3.metric("Est. portions", f"{portions:d}" if portions else "—")
             m1, m2 = st.columns(2)
             m1.metric("Cost / portion", format_money(cpp, "EUR"))
@@ -466,7 +481,6 @@ if page == "Batches":
             if unknown > 0:
                 st.warning(f"{unknown} volume ingredient(s) missing density → excluded from weight.")
 
-            # 🥧 pie chart: costo per ingrediente
             cost_labels, cost_vals = [], []
             for it in b.get("items", []):
                 if it["name"] in st.session_state.ingredients:
@@ -480,6 +494,7 @@ if page == "Batches":
                 ax.pie(cost_vals, labels=cost_labels, autopct='%1.1f%%', startangle=90)
                 ax.axis('equal')
                 st.pyplot(fig)
+                plt.close(fig)
                 st.caption("Pie chart of cost distribution per ingredient")
                 total_val = sum(cost_vals)
                 for lbl, val in zip(cost_labels, cost_vals):
@@ -498,17 +513,20 @@ if page == "Batches":
                 st.warning("Batch deleted (also removed from recipes)")
                 st.rerun()
 
-    # -------------------- NEW BATCH --------------------
-    with colR:
+    with tab_new:
         st.subheader("Create new batch 🧪")
         nb = st.session_state.new_batch_buffer
 
         st.markdown("#### Basic 📄")
-        nb["name"] = st.text_input("Batch name (free text)", value=nb.get("name",""), key="nb_name")
-        nb["category"] = st.text_input("Category (free text)", value=nb.get("category",""), key="nb_cat")
-        nb["portion_weight_g"] = st.number_input("Portion weight (g)", 1.0,
-                                                 value=float(nb.get("portion_weight_g", 280.0)),
-                                                 step=10.0, key="nb_pw")
+        nb["name"] = st.text_input("Batch name (free text)", value=nb.get("name", ""), key="nb_name")
+        nb["category"] = st.text_input("Category (free text)", value=nb.get("category", ""), key="nb_cat")
+        nb["portion_weight_g"] = st.number_input(
+            "Portion weight (g)",
+            1.0,
+            value=float(nb.get("portion_weight_g", 280.0)),
+            step=10.0,
+            key="nb_pw",
+        )
 
         st.divider()
 
@@ -525,8 +543,8 @@ if page == "Batches":
             qty_val = st.number_input("Qty (total in batch)", 0.0, value=0.5, step=0.1, key="nb_add_qty")
             unit_val = st.selectbox("Unit", ["kg", "g", "L", "ml"], key="nb_add_unit")
             c1, c2 = st.columns([1, 1])
-            add_btn = c1.form_submit_button("Add item to NEW batch")
-            rem_btn = c2.form_submit_button("Remove last item (NEW)")
+            add_btn = c1.form_submit_button("Add item")
+            rem_btn = c2.form_submit_button("Remove last item")
             if add_btn:
                 if name_ok is None:
                     st.error("Please add the ingredient to catalog first (see above).")
@@ -535,11 +553,10 @@ if page == "Batches":
                     nb["items"].append({"name": name_ok, "qty": qty_val, "unit": unit_val})
                     st.success("Item added")
                     st.rerun()
-            if rem_btn:
-                if nb.get("items"):
-                    nb["items"].pop()
-                    st.warning("Removed last")
-                    st.rerun()
+            if rem_btn and nb.get("items"):
+                nb["items"].pop()
+                st.warning("Removed last")
+                st.rerun()
 
         st.divider()
 
@@ -557,7 +574,7 @@ if page == "Batches":
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Total cost", format_money(tmp_cost, "EUR"))
-        m2.metric("Total weight", f"{tmp_w:.3f} kg")
+        m2.metric("Total weight", f"{format_number(tmp_w * 1000, 0)} g")
         m3.metric("Est. portions", f"{tmp_portions:d}" if tmp_portions else "—")
         m1, m2 = st.columns(2)
         m1.metric("Cost / portion", format_money(tmp_cpp, "EUR"))
@@ -587,75 +604,80 @@ if page == "Batches":
 # INGREDIENTS
 # -----------------------------------------------------------------------------
 if page == "Ingredients":
-    with tabs[4]:
-        st.header("Ingredients (package-based pricing)")
-        st.caption("Enter package size + package price; the app computes unit cost automatically.")
-        filter_txt = st.sidebar.text_input("Filter ingredients", key="ing_filter")
+    st.header("Ingredients (package-based pricing)")
+    st.caption("Enter package size + package price; the app computes unit cost automatically.")
+    filter_txt = st.sidebar.text_input("Filter ingredients", key="ing_filter")
 
-        names = [n for n in st.session_state.ingredients if filter_txt.lower() in n.lower()]
-        for name in names:
-            d = st.session_state.ingredients[name]
+    names = [n for n in st.session_state.ingredients if filter_txt.lower() in n.lower()]
+    for name in names:
+        d = st.session_state.ingredients[name]
         with st.expander(name, expanded=False):
-            d["unit"] = st.selectbox(f"{name} unit", ["kg", "L"],
-                                     index=0 if d["unit"] == "kg" else 1, key=f"ing_unit_{name}")
-            d["package_qty"] = st.number_input(f"{name} package size ({d['unit']})",
-                                               min_value=0.0001, value=float(d["package_qty"]),
-                                               step=0.1, key=f"ing_qty_{name}")
-            d["package_price"] = st.number_input(f"{name} package price",
-                                                 min_value=0.0, value=float(d["package_price"]),
-                                                 step=0.10, key=f"ing_price_{name}")
+            d["unit"] = st.selectbox(
+                f"{name} unit", ["kg", "L"],
+                index=0 if d["unit"] == "kg" else 1, key=f"ing_unit_{name}"
+            )
+            d["package_qty"] = st.number_input(
+                f"{name} package size ({d['unit']})",
+                min_value=0.0001, value=float(d["package_qty"]),
+                step=0.1, key=f"ing_qty_{name}"
+            )
+            d["package_price"] = st.number_input(
+                f"{name} package price",
+                min_value=0.0, value=float(d["package_price"]),
+                step=0.10, key=f"ing_price_{name}"
+            )
             unit_cost_val = d["package_price"] / max(d["package_qty"], 1e-9)
             st.info(f"Computed unit cost: {format_money(unit_cost_val, 'EUR')}/{d['unit']}")
-        save_state("ingredients", st.session_state.ingredients)
+    save_state("ingredients", st.session_state.ingredients)
 
-        st.divider()
-        with st.form("add_ingredient_form"):
-            new_in = st.text_input("Add new ingredient (name)", key="ing_new_name")
-            submitted = st.form_submit_button("Add ingredient")
-            if submitted:
-                if new_in:
-                    if new_in in st.session_state.ingredients:
-                        st.error("Ingredient already exists.")
-                    else:
-                        st.session_state.ingredients[new_in] = {"unit": "kg", "package_qty": 1.0, "package_price": 1.0}
-                        save_state("ingredients", st.session_state.ingredients)
-                        st.success("Ingredient added")
-                        st.rerun()
+    st.divider()
+    with st.form("add_ingredient_form"):
+        new_in = st.text_input("Add new ingredient (name)", key="ing_new_name")
+        submitted = st.form_submit_button("Add ingredient")
+        if submitted:
+            if new_in:
+                if new_in in st.session_state.ingredients:
+                    st.error("Ingredient already exists.")
                 else:
-                    st.error("Please enter an ingredient name")
+                    st.session_state.ingredients[new_in] = {"unit": "kg", "package_qty": 1.0, "package_price": 1.0}
+                    save_state("ingredients", st.session_state.ingredients)
+                    st.success("Ingredient added")
+                    st.rerun()
+            else:
+                st.error("Please enter an ingredient name")
 
 # -----------------------------------------------------------------------------
 # SETTINGS
 # -----------------------------------------------------------------------------
 if page == "Settings":
-    with tabs[5]:
-        st.header("Settings")
-        st.caption("Future: export CSV/PDF, backend licenze, densità editabili in UI, tema.")
+    st.header("Settings")
+    st.caption("Future: export CSV/PDF, backend licenze, densità editabili in UI, tema.")
 
-        st.subheader("Locale")
-        loc = st.selectbox("Interface locale", ["en_US", "it_IT"], key="settings_locale")
-        st.session_state["locale"] = loc
+    st.subheader("Locale")
+    loc = st.selectbox("Interface locale", ["en_US", "it_IT"], key="settings_locale")
+    st.session_state["locale"] = loc
 
-        st.subheader("Densities (kg/L)")
-        for name, val in list(st.session_state.densities.items()):
-            st.session_state.densities[name] = st.number_input(
-                f"{name} density", min_value=0.0001, value=float(val), step=0.01, key=f"dens_{name}")
-        save_state("densities", st.session_state.densities)
+    st.subheader("Densities (kg/L)")
+    for name, val in list(st.session_state.densities.items()):
+        st.session_state.densities[name] = st.number_input(
+            f"{name} density", min_value=0.0001, value=float(val), step=0.01, key=f"dens_{name}"
+        )
+    save_state("densities", st.session_state.densities)
 
-        new_dens_name = st.text_input("Add density for ingredient", key="dens_new_name")
-        new_dens_val = st.number_input("Density value", min_value=0.0001, value=1.0, step=0.01, key="dens_new_val")
-        if st.button("Add/Update density", key="dens_add_btn"):
-            if new_dens_name:
-                st.session_state.densities[new_dens_name] = float(new_dens_val)
-                save_state("densities", st.session_state.densities)
-                st.success("Density saved")
-                st.rerun()
-            else:
-                st.error("Please enter an ingredient name")
-
-        st.markdown("---")
-        if st.button("Reset all data (ingredients, recipes, batches)", key="settings_reset"):
-            for k in ("ingredients", "recipes", "batches", "new_batch_buffer"):
-                if k in st.session_state:
-                    del st.session_state[k]
+    new_dens_name = st.text_input("Add density for ingredient", key="dens_new_name")
+    new_dens_val = st.number_input("Density value", min_value=0.0001, value=1.0, step=0.01, key="dens_new_val")
+    if st.button("Add/Update density", key="dens_add_btn"):
+        if new_dens_name:
+            st.session_state.densities[new_dens_name] = float(new_dens_val)
+            save_state("densities", st.session_state.densities)
+            st.success("Density saved")
             st.rerun()
+        else:
+            st.error("Please enter an ingredient name")
+
+    st.markdown("---")
+    if st.button("Reset all data (ingredients, recipes, batches)", key="settings_reset"):
+        for k in ("ingredients", "recipes", "batches", "new_batch_buffer"):
+            if k in st.session_state:
+                del st.session_state[k]
+        st.rerun()
