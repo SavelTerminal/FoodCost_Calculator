@@ -10,6 +10,8 @@ import streamlit as st
 from math import ceil, floor
 import matplotlib.pyplot as plt  # per il grafico a torta
 
+from calc import unit_cost, batch_total_cost, batch_total_weight_kg, to_base
+
 # -----------------------------------------------------------------------------
 # CONFIG
 # -----------------------------------------------------------------------------
@@ -88,62 +90,28 @@ def _new_batch_id() -> str:
     st.session_state.batch_id_counter += 1
     return bid
 
-def unit_cost(name: str) -> float:
-    d = st.session_state.ingredients[name]
-    return float(d["package_price"]) / max(float(d["package_qty"]), 1e-9)
-
-def to_base(qty: float, unit: str) -> float:
-    if unit == "g":  return qty / 1000.0
-    if unit == "ml": return qty / 1000.0
-    return qty
-
-def to_weight_kg(name: str, qty: float, unit: str) -> float:
-    if unit == "kg": return qty
-    if unit == "g":  return qty / 1000.0
-    if unit in ("L", "ml"):
-        dens = st.session_state.densities.get(name)
-        if not dens:
-            return 0.0
-        return dens * qty if unit == "L" else dens * qty / 1000.0
-    return 0.0
-
-def batch_total_cost(batch: dict) -> float:
-    total = 0.0
-    for it in batch.get("items", []):
-        if it["name"] not in st.session_state.ingredients:
-            continue
-        total += unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"])
-    return total
-
-def batch_total_weight_kg(batch: dict) -> tuple[float, int]:
-    w, unknown = 0.0, 0
-    for it in batch.get("items", []):
-        wk = to_weight_kg(it["name"], float(it["qty"]), it["unit"])
-        if it["unit"] in ("L", "ml") and wk == 0.0:
-            unknown += 1
-        w += wk
-    return w, unknown
-
-def batch_portions_yield(batch: dict) -> int:
+def batch_portions_yield(batch: dict, densities: dict) -> int:
     pw = float(batch.get("portion_weight_g") or 0.0)
     if pw <= 0:
         return 0
-    tot_w, _ = batch_total_weight_kg(batch)
+    tot_w, _ = batch_total_weight_kg(batch, densities)
     return max(floor((tot_w * 1000.0) / pw), 0)
 
-def batch_cost_per_portion(batch: dict) -> float | None:
-    total = batch_total_cost(batch)
-    portions = batch_portions_yield(batch)
+
+def batch_cost_per_portion(batch: dict, ingredients: dict, densities: dict) -> float | None:
+    total = batch_total_cost(batch, ingredients)
+    portions = batch_portions_yield(batch, densities)
     if portions <= 0:
         return None
     return total / portions
 
-def toppings_cost_per_portion(recipe: dict) -> float:
+
+def toppings_cost_per_portion(recipe: dict, ingredients: dict) -> float:
     total = 0.0
     for it in recipe.get("items", []):
-        if it["name"] not in st.session_state.ingredients:
+        if it["name"] not in ingredients:
             continue
-        total += unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"])
+        total += unit_cost(it["name"], ingredients) * to_base(float(it["qty"]), it["unit"])
     return total / max(recipe.get("portions", 1), 1)
 
 def recipe_cost_per_pizza(recipe_name: str) -> float:
@@ -153,10 +121,12 @@ def recipe_cost_per_pizza(recipe_name: str) -> float:
         b = st.session_state.batches.get(bu["batch_id"])
         if not b:
             continue
-        cpp = batch_cost_per_portion(b)
+        cpp = batch_cost_per_portion(
+            b, st.session_state.ingredients, st.session_state.densities
+        )
         if cpp is not None:
             bcost += cpp * float(bu.get("portions", 0) or 0)
-    return bcost + toppings_cost_per_portion(r)
+    return bcost + toppings_cost_per_portion(r, st.session_state.ingredients)
 
 def format_money(x, cur):
     if x is None:
@@ -378,10 +348,12 @@ with tabs[3]:
 
             # Riepilogo + grafico a torta
             st.markdown("#### 📊 Batch Summary")
-            total_cost = batch_total_cost(b)
-            total_w, unknown = batch_total_weight_kg(b)
-            portions = batch_portions_yield(b)
-            cpp = batch_cost_per_portion(b)
+            total_cost = batch_total_cost(b, st.session_state.ingredients)
+            total_w, unknown = batch_total_weight_kg(b, st.session_state.densities)
+            portions = batch_portions_yield(b, st.session_state.densities)
+            cpp = batch_cost_per_portion(
+                b, st.session_state.ingredients, st.session_state.densities
+            )
             cpkg = (total_cost / total_w) if total_w > 0 else None
 
             m1, m2, m3 = st.columns(3)
@@ -399,7 +371,10 @@ with tabs[3]:
             for it in b.get("items", []):
                 if it["name"] in st.session_state.ingredients:
                     cost_labels.append(it["name"])
-                    cost_vals.append(unit_cost(it["name"]) * to_base(float(it["qty"]), it["unit"]))
+                    cost_vals.append(
+                        unit_cost(it["name"], st.session_state.ingredients)
+                        * to_base(float(it["qty"]), it["unit"])
+                    )
             if sum(cost_vals) > 0:
                 fig, ax = plt.subplots()
                 ax.pie(cost_vals, labels=cost_labels, autopct='%1.1f%%', startangle=90)
@@ -459,10 +434,12 @@ with tabs[3]:
 
         st.divider()
 
-        tmp_cost = batch_total_cost(nb)
-        tmp_w, tmp_unknown = batch_total_weight_kg(nb)
-        tmp_portions = batch_portions_yield(nb)
-        tmp_cpp = batch_cost_per_portion(nb)
+        tmp_cost = batch_total_cost(nb, st.session_state.ingredients)
+        tmp_w, tmp_unknown = batch_total_weight_kg(nb, st.session_state.densities)
+        tmp_portions = batch_portions_yield(nb, st.session_state.densities)
+        tmp_cpp = batch_cost_per_portion(
+            nb, st.session_state.ingredients, st.session_state.densities
+        )
         tmp_cpkg = (tmp_cost / tmp_w) if tmp_w > 0 else None
 
         m1, m2, m3 = st.columns(3)
