@@ -4,6 +4,8 @@
 # =============================================================================
 
 import os
+import hashlib
+import re
 import streamlit as st
 from math import ceil, floor
 import matplotlib.pyplot as plt  # per il grafico a torta
@@ -16,13 +18,25 @@ st.set_page_config(page_title="Food Cost Calculator", layout="wide")
 # -----------------------------------------------------------------------------
 # LICENSE (demo)
 # -----------------------------------------------------------------------------
-VALID_KEYS = { os.environ.get("APP_PASS","").upper() }
+def _hash_key(key: str) -> str:
+    """Return SHA-256 hex digest of the given key."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+# Environment variable can contain multiple keys separated by commas or spaces
+VALID_KEYS = {
+    _hash_key(k.strip().upper())
+    for k in re.split(r"[\s,]+", os.environ.get("APP_PASS", ""))
+    if k.strip()
+}
 
 if "unlocked" not in st.session_state:
     st.session_state.unlocked = False
 
 def check_key(k: str) -> bool:
-    return k.strip().upper() in VALID_KEYS
+    k = (k or "").strip()
+    if not k:
+        return False
+    return _hash_key(k.upper()) in VALID_KEYS
 
 if not st.session_state.unlocked:
     st.title("Enter License Key")
