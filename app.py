@@ -194,6 +194,20 @@ def ingredient_inline_creator(name_key: str, prefix: str = "") -> str | None:
             st.rerun()
     return None
 
+def reset_session_state() -> None:
+    """Remove persistent data from the session state."""
+    for k in (
+        "ingredients",
+        "recipes",
+        "batches",
+        "new_batch_buffer",
+        "batch_id_counter",
+        "densities",
+        "unlocked",
+    ):
+        if k in st.session_state:
+            del st.session_state[k]
+
 # -----------------------------------------------------------------------------
 # UI — TABS
 # -----------------------------------------------------------------------------
@@ -532,7 +546,5 @@ with tabs[5]:
     st.header("Settings")
     st.caption("Future: export CSV/PDF, backend licenze, densità editabili in UI, tema.")
     if st.button("Reset all data (ingredients, recipes, batches)", key="settings_reset"):
-        for k in ("ingredients", "recipes", "batches", "new_batch_buffer"):
-            if k in st.session_state:
-                del st.session_state[k]
+        reset_session_state()
         st.rerun()
